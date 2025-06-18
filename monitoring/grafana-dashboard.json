@@ -1,0 +1,166 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "ML Model Production Dashboard",
+    "tags": ["ml", "production", "monitoring"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Prediction Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(ml_predictions_total[5m])",
+            "legendFormat": "Predictions/sec"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "min": 0
+          }
+        },
+        "gridPos": {"h": 8, "w": 6, "x": 0, "y": 0}
+      },
+      {
+        "id": 2,
+        "title": "Error Rate",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(ml_prediction_errors_total[5m])",
+            "legendFormat": "Errors/sec"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "reqps",
+            "min": 0,
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 0.01},
+                {"color": "red", "value": 0.1}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 6, "x": 6, "y": 0}
+      },
+      {
+        "id": 3,
+        "title": "Response Time (95th percentile)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(ml_prediction_duration_seconds_bucket[5m]))",
+            "legendFormat": "95th percentile"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "min": 0,
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 0.5},
+                {"color": "red", "value": 1.0}
+              ]
+            }
+          }
+        },
+        "gridPos": {"h": 8, "w": 6, "x": 12, "y": 0}
+      },
+      {
+        "id": 4,
+        "title": "Active Pods",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "count(up{job=\"ml-model-api\"} == 1)",
+            "legendFormat": "Healthy Pods"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "min": 0
+          }
+        },
+        "gridPos": {"h": 8, "w": 6, "x": 18, "y": 0}
+      },
+      {
+        "id": 5,
+        "title": "Prediction Volume Over Time",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(ml_predictions_total[1m])",
+            "legendFormat": "Predictions/sec"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Requests/sec",
+            "min": 0
+          }
+        ],
+        "gridPos": {"h": 9, "w": 12, "x": 0, "y": 8}
+      },
+      {
+        "id": 6,
+        "title": "Response Time Distribution",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(ml_prediction_duration_seconds_bucket[5m]))",
+            "legendFormat": "50th percentile"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(ml_prediction_duration_seconds_bucket[5m]))",
+            "legendFormat": "95th percentile"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(ml_prediction_duration_seconds_bucket[5m]))",
+            "legendFormat": "99th percentile"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "Seconds",
+            "min": 0
+          }
+        ],
+        "gridPos": {"h": 9, "w": 12, "x": 12, "y": 8}
+      },
+      {
+        "id": 7,
+        "title": "Resource Usage",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(container_cpu_usage_seconds_total{pod=~\"ml-model-.*\"}[5m])",
+            "legendFormat": "CPU Usage - {{pod}}"
+          },
+          {
+            "expr": "container_memory_usage_bytes{pod=~\"ml-model-.*\"} / 1024 / 1024",
+            "legendFormat": "Memory (MB) - {{pod}}"
+          }
+        ],
+        "yAxes": [
+          {
+            "label": "CPU Cores / Memory MB"
+          }
+        ],
+        "gridPos": {"h": 9, "w": 24, "x": 0, "y": 17}
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "10s"
+  }
+}

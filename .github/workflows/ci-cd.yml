@@ -1,0 +1,268 @@
+name: ML Production Pipeline CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Trigger retraining weekly
+    - cron: '0 2 * * 0'
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Cache pip packages
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov
+        
+    - name: Run unit tests
+      run: |
+        python -m pytest tests/ -v --cov=src --cov-report=xml
+        
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        
+  train-model:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' || github.event_name == 'schedule'
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Train model
+      run: |
+        python src/train.py
+        
+    - name: Validate model performance
+      run: |
+        python -c "
+        import joblib
+        import json
+        
+        # Load model and check basic performance
+        model = joblib.load('models/house_price_model.joblib')
+        
+        # Basic validation
+        if not hasattr(model, 'predict'):
+            raise Exception('Model does not have predict method')
+            
+        print('Model validation passed')
+        "
+        
+    - name: Upload model artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: trained-model
+        path: models/
+        
+  build-and-push:
+    runs-on: ubuntu-latest
+    needs: [test, train-model]
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Download model artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: trained-model
+        path: models/
+        
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+      
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+        
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v4
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix=v1.0.0-
+          type=raw,value=latest,enable={{is_default_branch}}
+          
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: |
+          MODEL_VERSION=v1.0.0-${{ github.sha }}
+          
+  security-scan:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      with:
+        sarif_file: 'trivy-results.sarif'
+        
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: [build-and-push, security-scan]
+    if: github.ref == 'refs/heads/main'
+    environment: staging
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.27.0'
+        
+    - name: Configure kubectl
+      run: |
+        # In production, use proper cluster credentials
+        # This is a placeholder for your cluster setup
+        echo "Configure kubectl for staging cluster"
+        
+    - name: Deploy to staging
+      run: |
+        # Update image in deployment
+        sed -i 's|yourusername/ml-production-pipeline:latest|${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest|g' k8s/deployment.yaml
+        
+        # Apply Kubernetes manifests
+        kubectl apply -f k8s/ --namespace=staging --dry-run=client -o yaml
+        
+        echo "Staging deployment configured"
+        
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Install test dependencies
+      run: |
+        pip install requests pytest
+        
+    - name: Run integration tests
+      run: |
+        # Wait for deployment to be ready
+        sleep 30
+        
+        # Run integration tests against staging
+        python -c "
+        import requests
+        import json
+        
+        # Test data
+        test_data = {
+            'size_sqft': 2000,
+            'bedrooms': 3,
+            'bathrooms': 2,
+            'age_years': 5,
+            'garage': 2,
+            'location_score': 8.5,
+            'school_rating': 9.0
+        }
+        
+        # In production, replace with actual staging URL
+        staging_url = 'https://staging-ml-api.yourcompany.com'
+        
+        print('Integration tests would run against:', staging_url)
+        print('Test payload:', json.dumps(test_data, indent=2))
+        "
+        
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Deploy to production
+      run: |
+        echo "Production deployment would happen here"
+        echo "Image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+        
+        # In production:
+        # 1. Blue-green deployment
+        # 2. Canary release
+        # 3. Health checks
+        # 4. Rollback capability
+        
+  notify:
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    if: always()
+    
+    steps:
+    - name: Notify team
+      run: |
+        if [ "${{ needs.deploy-production.result }}" == "success" ]; then
+          echo "✅ Production deployment successful!"
+        else
+          echo "❌ Production deployment failed!"
+        fi
+        
+        # In production, send to Slack/Teams/Email

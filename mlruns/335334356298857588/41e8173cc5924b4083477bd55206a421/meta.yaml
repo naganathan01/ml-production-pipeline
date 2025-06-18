@@ -1,0 +1,14 @@
+artifact_uri: file:///E:/&%A/ml-production-pipeline/mlruns/335334356298857588/41e8173cc5924b4083477bd55206a421/artifacts
+end_time: 1750253841416
+entry_point_name: ''
+experiment_id: '335334356298857588'
+lifecycle_stage: active
+run_id: 41e8173cc5924b4083477bd55206a421
+run_name: gentle-fawn-993
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1750253815183
+status: 3
+tags: []
+user_id: Naganathan
